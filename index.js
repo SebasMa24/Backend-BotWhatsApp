@@ -12,7 +12,10 @@ client.on('ready', () => {
 });
 
 client.on('qr', qr => {
-    qrcode.generate(qr, {small: true});
+    qrcode.toDataURL(qr, (err, url) => {
+        console.log('Escanea este QR abriendo esta URL en el navegador:');
+        console.log(url);
+    });
 });
 
 client.initialize();
