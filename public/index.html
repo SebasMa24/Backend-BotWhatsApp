@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Bot de WhatsApp</title>
+</head>
+<body>
+  <h1>Estado del Bot de WhatsApp</h1>
+  <div id="status">Cargando estado...</div>
+  <img id="qr" src="" alt="Código QR" style="max-width:300px; display:none; margin-top: 10px;">
+
+  <script>
+    async function checkQRStatus() {
+      try {
+        const res = await fetch('/qr');
+        const data = await res.json();
+
+        const statusEl = document.getElementById('status');
+        const qrEl = document.getElementById('qr');
+
+        if (data.status === 'waiting') {
+          statusEl.textContent = '📱 Escanea el código QR con WhatsApp';
+          qrEl.src = data.qr;
+          qrEl.style.display = 'block';
+        } else if (data.status === 'ready') {
+          statusEl.textContent = '✅ Cliente conectado y activo';
+          qrEl.style.display = 'none';
+        } else {
+          statusEl.textContent = '⏳ Cargando QR...';
+          qrEl.style.display = 'none';
+        }
+      } catch (err) {
+        document.getElementById('status').textContent = '❌ Error al consultar el estado del bot';
+        console.error(err);
+      }
+
+      // Volver a consultar cada 5 segundos
+      setTimeout(checkQRStatus, 5000);
+    }
+
+    checkQRStatus();
+  </script>
+</body>
+</html>
