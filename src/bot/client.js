@@ -6,8 +6,9 @@ let isReady = false;
 
 const client = new Client({
   puppeteer: {
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  },
+    args: [
+      '--no-sandbox']
+  }
 });
 
 client.on('qr', async (qr) => {
@@ -25,6 +26,7 @@ client.on('ready', () => {
 client.initialize();
 
 module.exports = {
+  client,
   getQR: () => latestQR,
   isClientReady: () => isReady
 };

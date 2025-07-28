@@ -1,18 +1,88 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
   <meta charset="UTF-8">
-  <title>Bot de WhatsApp</title>
+  <title>Bot de WhatsApp - Envío Masivo</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 1rem;
+      max-width: 900px;
+      margin: auto;
+    }
+
+    input,
+    textarea,
+    button {
+      display: block;
+      margin: 10px 0;
+      width: 100%;
+      max-width: 500px;
+    }
+
+    #qr {
+      max-width: 300px;
+      margin: 1rem 0;
+      display: none;
+    }
+
+    table {
+      margin-top: 1rem;
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border: 1px solid #ccc;
+      padding: 8px;
+    }
+
+    .seccion {
+      margin-top: 2rem;
+    }
+  </style>
 </head>
+
 <body>
-  <h1>Estado del Bot de WhatsApp</h1>
-  <div id="status">Cargando estado...</div>
-  <img id="qr" src="" alt="Código QR" style="max-width:300px; display:none; margin-top: 10px;">
+
+  <h1>🤖 Estado del Bot de WhatsApp</h1>
+  <div id="status">⏳ Cargando estado...</div>
+  <img id="qr" src="" alt="Código QR" />
+
+  <div id="formulario">
+    <div class="seccion">
+      <h2>📤 Enviar mensajes desde Excel</h2>
+
+      <input type="file" id="excelInput" accept=".xlsx, .xls" />
+
+      <label for="mensajePlantilla">Mensaje personalizado:</label>
+      <textarea id="mensajePlantilla" rows="4"
+        placeholder="Ejemplo: Buen día {prefijo} {nombre}, este es un mensaje de prueba."></textarea>
+      <div id="variablesDetectadas" style="margin: 1rem 0; font-style: italic; color: #555;"></div>
+
+      <label for="mediaUrlExcel">URL de imagen o Video (opcional):</label>
+      <input type="text" id="mediaUrlExcel" placeholder="https://..." />
+      <div id="urlValidaInfo" style="color: red; font-size: 0.9rem;"></div>
+      <img id="previewImagen" src="" alt="Vista previa" style="max-width: 300px; display: none; margin-top: 10px;" />
+
+      <button onclick="enviarMensajes()">Enviar mensajes masivos</button>
+
+      <div id="preview"></div>
+      <div id="resultado"></div>
+    </div>
+  </div>
 
   <script>
+    let contactos = [];
+    let clienteListo = false;
+
+    // Estado del bot y código QR
     async function checkQRStatus() {
       try {
-        const res = await fetch('/qr');
+        const res = await fetch('/api/qr');
         const data = await res.json();
 
         const statusEl = document.getElementById('status');
@@ -22,23 +92,188 @@
           statusEl.textContent = '📱 Escanea el código QR con WhatsApp';
           qrEl.src = data.qr;
           qrEl.style.display = 'block';
+          clienteListo = false;
         } else if (data.status === 'ready') {
-          statusEl.textContent = '✅ Cliente conectado y activo';
+          statusEl.textContent = '✅ Cliente conectado y listo';
           qrEl.style.display = 'none';
+          clienteListo = true;
         } else {
-          statusEl.textContent = '⏳ Cargando QR...';
+          statusEl.textContent = '⏳ Esperando QR...';
           qrEl.style.display = 'none';
+          clienteListo = false;
         }
       } catch (err) {
         document.getElementById('status').textContent = '❌ Error al consultar el estado del bot';
         console.error(err);
+        clienteListo = false;
       }
 
-      // Volver a consultar cada 5 segundos
       setTimeout(checkQRStatus, 5000);
     }
+
+    document.getElementById('excelInput').addEventListener('change', handleFile);
+
+    function handleFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function (evt) {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(firstSheet);
+
+        const varContainer = document.getElementById('variablesDetectadas');
+        if (rows.length === 0) {
+          varContainer.textContent = '❌ El archivo está vacío.';
+          return;
+        }
+
+        const columnas = Object.keys(rows[0]);
+
+        // Botones para insertar variables
+        let variablesHTML = '🧩 Variables disponibles: ';
+        columnas.forEach(col => {
+          variablesHTML += `<button type="button" onclick="insertarVariable('{${col}}')">{${col}}</button> `;
+        });
+        varContainer.innerHTML = variablesHTML;
+
+        // Guardar contactos
+        contactos = rows.map(row => {
+          const contacto = {};
+          columnas.forEach(col => {
+            contacto[col] = row[col] || '';
+          });
+          return contacto;
+        });
+
+        mostrarPreview(contactos, columnas);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function insertarVariable(variable) {
+      const textarea = document.getElementById('mensajePlantilla');
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = textarea.value;
+      textarea.value = text.slice(0, start) + variable + text.slice(end);
+      textarea.focus();
+      textarea.selectionEnd = start + variable.length;
+    }
+
+    function mostrarPreview(contactos, columnas) {
+      let html = '<table><thead><tr>';
+      columnas.forEach(col => {
+        html += `<th>${col}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+
+      contactos.forEach(contacto => {
+        html += '<tr>';
+        columnas.forEach(col => {
+          html += `<td>${contacto[col]}</td>`;
+        });
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      document.getElementById('preview').innerHTML = html;
+    }
+
+    async function enviarMensajes() {
+      const plantilla = document.getElementById('mensajePlantilla').value;
+      const mediaUrl = document.getElementById('mediaUrlExcel').value.trim();
+      const resultadoEl = document.getElementById('resultado');
+      const excelFile = document.getElementById('excelInput');
+
+      if (!excelFile || !excelFile.files[0]) {
+        alert('⚠️ Debes cargar un archivo Excel.');
+        return;
+      }
+
+      if (!plantilla.includes('{Nombre}')) {
+        alert('⚠️ El mensaje debe contener al menos el marcador {Nombre}.');
+        return;
+      }
+
+      if (!clienteListo) {
+        alert('❌ El cliente de WhatsApp no está listo. Escanea el código QR antes de enviar mensajes.');
+        resultadoEl.innerHTML = '❌ Cliente no conectado.<br>';
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('excel', excelFile.files[0]);
+      formData.append('mensajePlantilla', plantilla);
+      formData.append('mediaUrl', mediaUrl);
+
+      resultadoEl.innerHTML = '⏳ Enviando mensajes...<br>';
+
+      try {
+        const res = await fetch('/api/send', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+
+        if (data.success && data.results) {
+          for (const r of data.results) {
+            resultadoEl.innerHTML += `${r.status} - ${r.to}<br>`;
+          }
+          resultadoEl.innerHTML += '<strong>✅ Proceso terminado.</strong>';
+        } else {
+          resultadoEl.innerHTML += '❌ Error en el envío masivo.<br>';
+        }
+
+      } catch (err) {
+        console.error(err);
+        resultadoEl.innerHTML = '❌ Error de red al enviar los mensajes.';
+      }
+    }
+
+    const inputUrl = document.getElementById('mediaUrlExcel');
+    const infoUrl = document.getElementById('urlValidaInfo');
+    const previewImagen = document.getElementById('previewImagen');
+
+    inputUrl.addEventListener('input', () => {
+      const url = inputUrl.value.trim();
+      previewImagen.style.display = 'none';
+      infoUrl.textContent = '';
+      infoUrl.style.color = 'red';
+
+      if (!url) return;
+
+      // Expresiones regulares mejoradas
+      const extensionesImagen = /\.(png|jpe?g|gif|webp|bmp|tiff?|svg)$/i;
+      const extensionesVideo = /\.(mp4|webm|ogg|mov|avi|wmv|flv|mkv|3gp)$/i;
+      const esImgurGifv = /imgur\.com\/.*\.gifv$/i;
+
+      if (extensionesImagen.test(url)) {
+        previewImagen.src = url;
+        previewImagen.style.display = 'block';
+        infoUrl.style.color = 'green';
+        infoUrl.textContent = '✅ Imagen válida detectada.';
+      } else if (extensionesVideo.test(url) || esImgurGifv.test(url)) {
+        // Convertir .gifv de Imgur a .mp4
+        const videoUrl = url.replace(/\.gifv$/, '.mp4');
+        previewImagen.style.display = 'none';
+        infoUrl.style.color = 'green';
+        infoUrl.textContent = '✅ URL de video válida detectada.';
+
+        // Actualizar el campo con la URL corregida si era .gifv
+        if (esImgurGifv.test(url)) {
+          inputUrl.value = videoUrl;
+        }
+      } else {
+        infoUrl.textContent = '⚠️ La URL no parece una imagen o video válido. Formatos soportados: .png, .jpg, .mp4, etc.';
+      }
+    });
 
     checkQRStatus();
   </script>
 </body>
+
 </html>
