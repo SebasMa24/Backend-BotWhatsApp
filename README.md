@@ -27,3 +27,9 @@ BotWhatsAppTest/
 - **Node JS**: Framework Principal
 - **Express**: Framework de desarrollo
 - **whatsapp-web**: Libreria para la conexión con WhatsApp
+
+
+### Como ejecutar
+- En la carpeta raiz del proyecto abrir una consola
+- npm install (Instalar dependencias)
+- node src/server.js (Ejecutar servidor)
