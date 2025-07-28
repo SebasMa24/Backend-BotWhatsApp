@@ -24,8 +24,7 @@ async function descargarArchivo(url) {
     responseType: 'stream',
     headers: {
       'User-Agent': 'Mozilla/5.0',
-      'Accept': '*/*',
-      'Referer': 'https://file-examples.com/'
+      'Accept': '*/*'
     }
   });
 
@@ -36,6 +35,10 @@ async function descargarArchivo(url) {
     writer.on('finish', () => resolve(rutaArchivo));
     writer.on('error', reject);
   });
+}
+
+function esVideo(path) {
+  return /\.(mp4|mov|avi|mkv|webm)$/i.test(path);
 }
 
 const sendMessages = async (req, res) => {
@@ -73,6 +76,8 @@ const sendMessages = async (req, res) => {
       return res.status(400).json({ error: 'El archivo Excel no contiene datos válidos.' });
     }
 
+    let esArchivoVideo = false;
+
     // ✅ Descargar media desde URL al sistema de archivos
     if (mediaUrl) {
       try {
@@ -83,7 +88,7 @@ const sendMessages = async (req, res) => {
         if (stats.size > 16 * 1024 * 1024) {
           throw new Error('El archivo multimedia supera el límite de 16MB para WhatsApp.');
         }
-
+        esArchivoVideo = esVideo(rutaMediaDescargada);
         media = MessageMedia.fromFilePath(rutaMediaDescargada);
         console.log('✅ Media descargada y cargada desde archivo local.');
       } catch (err) {
@@ -118,7 +123,11 @@ const sendMessages = async (req, res) => {
 
         if (media) {
           await delay(1000);
-          await client.sendMessage(number, media);
+          if (esArchivoVideo) {
+            await client.sendMessage(number, media, {sendMediaAsDocument: true});
+          } else {
+            await client.sendMessage(number, media);
+          }
         }
 
         resultados.push({ to: celular, status: '✅ Enviado con éxito' });
@@ -144,14 +153,14 @@ const sendMessages = async (req, res) => {
     } catch (e) {
       console.warn('⚠️ No se pudo eliminar el archivo temporal:', e.message);
     }
-    /*
+    
     if (rutaMediaDescargada && fs.existsSync(rutaMediaDescargada)) {
       try {
         fs.unlinkSync(rutaMediaDescargada);
       } catch (e) {
         console.warn('⚠️ No se pudo eliminar el archivo media descargado:', e.message);
       }
-    }*/
+    }
   }
 
   res.json({ success: true, results: resultados });
