@@ -6,182 +6,263 @@ const path = require('path');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+// Configuración
+const CONFIG = {
+  DELAY_BETWEEN_MESSAGES: 1200,
+  DELAY_BEFORE_MEDIA: 1000,
+  MAX_FILE_SIZE: 16 * 1024 * 1024, // 16MB
+  TEMP_FOLDER: path.join(__dirname, '../temp'),
+  VIDEO_EXTENSIONS: ['mp4', 'mov', 'avi', 'mkv', 'webm']
+};
 
-async function descargarArchivo(url) {
-  const extension = path.extname(url).split('.').pop() || 'bin';
-  const nombreArchivo = `${uuidv4()}.${extension}`;
-  const carpetaTemp = path.join(__dirname, '../temp');
-  const rutaArchivo = path.join(carpetaTemp, nombreArchivo);
-
-  if (!fs.existsSync(carpetaTemp)) {
-    fs.mkdirSync(carpetaTemp, { recursive: true });
-  }
-
-  const response = await axios({
-    url,
-    method: 'GET',
-    responseType: 'stream',
-    headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Accept': '*/*'
+// Utilitarios
+const FileUtils = {
+  createTempDirectory: () => {
+    if (!fs.existsSync(CONFIG.TEMP_FOLDER)) {
+      fs.mkdirSync(CONFIG.TEMP_FOLDER, { recursive: true });
     }
-  });
+  },
 
-  const writer = fs.createWriteStream(rutaArchivo);
+  deleteFile: (filePath) => {
+    try {
+      if (filePath && fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`🗑️ Archivo temporal eliminado: ${filePath}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ No se pudo eliminar archivo temporal ${filePath}:`, error.message);
+    }
+  },
 
-  return new Promise((resolve, reject) => {
-    response.data.pipe(writer);
-    writer.on('finish', () => resolve(rutaArchivo));
-    writer.on('error', reject);
-  });
-}
+  isVideo: (filePath) => {
+    const extension = path.extname(filePath).toLowerCase().slice(1);
+    return CONFIG.VIDEO_EXTENSIONS.includes(extension);
+  },
 
-function esVideo(path) {
-  return /\.(mp4|mov|avi|mkv|webm)$/i.test(path);
-}
+  validateFileSize: (filePath) => {
+    const stats = fs.statSync(filePath);
+    if (stats.size > CONFIG.MAX_FILE_SIZE) {
+      throw new Error(`El archivo supera el límite de ${CONFIG.MAX_FILE_SIZE / (1024 * 1024)}MB para WhatsApp.`);
+    }
+  }
+};
+
+const NetworkUtils = {
+  downloadFile: async (url) => {
+    const extension = path.extname(url).split('.').pop() || 'bin';
+    const fileName = `${uuidv4()}.${extension}`;
+    const filePath = path.join(CONFIG.TEMP_FOLDER, fileName);
+
+    FileUtils.createTempDirectory();
+
+    const response = await axios({
+      url,
+      method: 'GET',
+      responseType: 'stream',
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': '*/*'
+      }
+    });
+
+    const writer = fs.createWriteStream(filePath);
+
+    return new Promise((resolve, reject) => {
+      response.data.pipe(writer);
+      writer.on('finish', () => resolve(filePath));
+      writer.on('error', reject);
+    });
+  }
+};
+
+const MessageUtils = {
+  delay: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+
+  normalizeTemplateVariables: (row) => {
+    const normalized = {};
+    for (const key in row) {
+      normalized[key.toLowerCase()] = row[key]?.toString().trim() || '';
+    }
+    return normalized;
+  },
+
+  replaceTemplateVariables: (template, variables) => {
+    return template.replace(/{(.*?)}/g, (_, variable) => {
+      const value = variables[variable.toLowerCase()];
+      return value !== undefined ? value : `{${variable}}`;
+    });
+  },
+
+  formatPhoneNumber: (phone) => {
+    const cleaned = String(phone || '').replace(/\D/g, '').trim();
+    return cleaned.includes('@c.us') ? cleaned : `${cleaned}@c.us`;
+  }
+};
+
+// Procesamiento de archivos
+const FileProcessor = {
+  processExcelFile: (filePath) => {
+    const workbook = xlsx.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return xlsx.utils.sheet_to_json(sheet);
+  },
+
+  processUploadedMedia: (uploadedFile) => {
+    try {
+      console.log('📎 Procesando archivo multimedia subido:', uploadedFile.originalname);
+
+      const mime = uploadedFile.mimetype;
+      const extension = mime.split('/')[1] || 'bin';
+      const fileName = `${uuidv4()}.${extension}`;
+      const filePath = path.join(CONFIG.TEMP_FOLDER, fileName);
+
+      FileUtils.createTempDirectory();
+      fs.copyFileSync(uploadedFile.path, filePath);
+      FileUtils.validateFileSize(filePath);
+
+      return {
+        path: filePath,
+        media: MessageMedia.fromFilePath(filePath),
+        isVideo: FileUtils.isVideo(filePath)
+      };
+    } catch (error) {
+      console.error('⚠️ Error al procesar media subido:', error.message);
+      throw error;
+    }
+  },
+
+  processMediaUrl: async (url) => {
+    try {
+      console.log('⬇️ Descargando media desde URL:', url);
+      const filePath = await NetworkUtils.downloadFile(url);
+      FileUtils.validateFileSize(filePath);
+
+      return {
+        path: filePath,
+        media: MessageMedia.fromFilePath(filePath),
+        isVideo: FileUtils.isVideo(filePath)
+      };
+    } catch (error) {
+      console.error('⚠️ Error al descargar media desde URL:', error.message);
+      throw error;
+    }
+  }
+};
 
 const sendMessages = async (req, res) => {
   console.log('🔄 Iniciando envío de mensajes...');
 
-  if (!isClientReady()) {
-    console.warn('🚫 Cliente de WhatsApp no está listo');
-    return res.status(503).json({ error: 'El cliente de WhatsApp no está listo.' });
-  }
-
-  const mediaUrl = req.body.mediaUrl || '';
-  const plantilla = req.body.mensajePlantilla || '';
-
-  if (!req.file) {
-    console.warn('🚫 No se recibió archivo Excel');
-    return res.status(400).json({ error: 'Falta el archivo Excel.' });
-  }
-
-  if (!plantilla || !plantilla.toLowerCase().includes('{nombre}')) {
-    console.warn('🚫 Plantilla no contiene marcador {Nombre}');
-    return res.status(400).json({
-      error: 'Debe incluir una plantilla de mensaje válida con al menos {Nombre}.'
-    });
-  }
-
-  const resultados = [];
-  let media = null;
-  let rutaMediaDescargada = '';
+  // Lista de archivos temporales a eliminar
+  const tempFilesToDelete = [];
 
   try {
-    console.log('✅ Archivo recibido:', req.file.originalname);
-    console.log('📝 Plantilla:', plantilla);
+    if (!isClientReady()) {
+      console.warn('🚫 Cliente de WhatsApp no está listo');
+      return res.status(503).json({ error: 'El cliente de WhatsApp no está listo.' });
+    }
+
+    const { mediaUrl, mensajePlantilla: template } = req.body;
+    const excelFile = req.files?.excel?.[0];
+    const uploadedMedia = req.files?.mediaFile?.[0];
+
+    
+    tempFilesToDelete.push(excelFile.path);
+    if (uploadedMedia) tempFilesToDelete.push(uploadedMedia.path);
+
+    // Validación: Solo un medio permitido (URL o archivo subido)
+    if (mediaUrl && uploadedMedia) {
+      console.warn('🚫 Se recibieron ambos: mediaUrl y archivo multimedia');
+      return res.status(400).json({ 
+        error: 'Solo se permite un medio a la vez: URL o archivo subido, no ambos.' 
+      });
+    }
+
+    // Validaciones adicionales
+    if (!excelFile) {
+      console.warn('🚫 No se recibió archivo Excel');
+      return res.status(400).json({ error: 'Falta el archivo Excel.' });
+    }
+
+    if (!template || !/{\s*nombre\s*}/i.test(template)) {
+      console.warn('🚫 Plantilla no contiene marcador {Nombre}');
+      return res.status(400).json({
+        error: 'Debe incluir una plantilla de mensaje válida con al menos {Nombre}.'
+      });
+    }
+
+    console.log('✅ Archivo recibido:', excelFile.originalname);
+    console.log('📝 Plantilla:', template);
     console.log('🌐 Media URL:', mediaUrl);
+    console.log('📎 Archivo multimedia subido:', uploadedMedia?.originalname || 'Ninguno');
 
-    const workbook = xlsx.readFile(req.file.path);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = xlsx.utils.sheet_to_json(sheet);
-
+    // Procesar Excel
+    const data = FileProcessor.processExcelFile(excelFile.path);
     if (!Array.isArray(data) || data.length === 0) {
       console.warn('🚫 Excel vacío o no válido');
       return res.status(400).json({ error: 'El archivo Excel no contiene datos válidos.' });
     }
 
-    let esArchivoVideo = false;
-
-    if (mediaUrl) {
-      try {
-        console.log('⬇️ Descargando media desde URL...');
-        rutaMediaDescargada = await descargarArchivo(mediaUrl);
-        console.log('📁 Media guardado en:', rutaMediaDescargada);
-
-        const stats = fs.statSync(rutaMediaDescargada);
-        console.log('📏 Tamaño del archivo media:', stats.size, 'bytes');
-
-        if (stats.size > 16 * 1024 * 1024) {
-          throw new Error('El archivo multimedia supera el límite de 16MB para WhatsApp.');
-        }
-
-        esArchivoVideo = esVideo(rutaMediaDescargada);
-        media = MessageMedia.fromFilePath(rutaMediaDescargada);
-        console.log('✅ Media cargada en objeto MessageMedia');
-
-      } catch (err) {
-        console.warn('⚠️ No se pudo obtener el media:', err.message);
-      }
+    // Procesar media
+    let mediaInfo = null;
+    if (uploadedMedia) {
+      mediaInfo = FileProcessor.processUploadedMedia(uploadedMedia);
+      tempFilesToDelete.push(mediaInfo.path);
+      console.log('✅ Media local lista para enviar');
+    } else if (mediaUrl) {
+      mediaInfo = await FileProcessor.processMediaUrl(mediaUrl);
+      tempFilesToDelete.push(mediaInfo.path);
+      console.log('✅ Media descargada desde URL lista para enviar');
     }
 
+    // Resto del código de envío de mensajes...
+    const results = [];
     for (const [index, row] of data.entries()) {
       console.log(`📨 Procesando fila ${index + 1}:`, row);
 
-      const nombre = row.Nombre?.toString().trim() || '';
-      const celular = String(row.Celular || '').replace(/\D/g, '').trim();
-      const prefijo = (row.Prefijo || row.Genero || '').toString().trim();
+      const phoneNumber = MessageUtils.formatPhoneNumber(row.Celular);
+      const variables = MessageUtils.normalizeTemplateVariables(row);
+      const message = MessageUtils.replaceTemplateVariables(template, variables);
 
-      let mensajePersonalizado = plantilla;
-
-      const valoresNormalizados = {};
-      for (const key in row) {
-        valoresNormalizados[key.toLowerCase()] = row[key]?.toString().trim() || '';
-      }
-
-      mensajePersonalizado = mensajePersonalizado.replace(/{(.*?)}/g, (_, variable) => {
-        const valor = valoresNormalizados[variable.toLowerCase()];
-        return valor !== undefined ? valor : `{${variable}}`;
-      });
-
-      const number = celular.includes('@c.us') ? celular : `${celular}@c.us`;
-      console.log(`📱 Enviando a ${number} -> Mensaje:`, mensajePersonalizado);
+      console.log(`📱 Enviando a ${phoneNumber} -> Mensaje:`, message);
 
       try {
-        await client.sendMessage(number, mensajePersonalizado);
-        console.log(`✅ Mensaje enviado a ${number}`);
+        await client.sendMessage(phoneNumber, message);
+        console.log(`✅ Mensaje enviado a ${phoneNumber}`);
 
-        if (media) {
-          await delay(1000);
-          console.log(`📎 Enviando media a ${number} (${esArchivoVideo ? 'video/documento' : 'imagen'})`);
-          if (esArchivoVideo) {
-            await client.sendMessage(number, media, { sendMediaAsDocument: true });
-          } else {
-            await client.sendMessage(number, media);
-          }
-          console.log(`✅ Media enviada a ${number}`);
+        if (mediaInfo) {
+          await MessageUtils.delay(CONFIG.DELAY_BEFORE_MEDIA);
+          console.log(`📎 Enviando media a ${phoneNumber} (${mediaInfo.isVideo ? 'video/documento' : 'imagen'})`);
+          
+          const options = mediaInfo.isVideo ? { sendMediaAsDocument: true } : {};
+          await client.sendMessage(phoneNumber, mediaInfo.media, options);
+          
+          console.log(`✅ Media enviada a ${phoneNumber}`);
         }
 
-        resultados.push({ to: celular, status: '✅ Enviado con éxito' });
-
-      } catch (innerErr) {
-        console.error(`❌ Error al enviar a ${celular}:`, innerErr.message);
-        resultados.push({
-          to: celular,
-          status: `❌ Error al enviar: ${innerErr.message}`
+        results.push({ to: phoneNumber, status: '✅ Enviado con éxito' });
+      } catch (error) {
+        console.error(`❌ Error al enviar a ${phoneNumber}:`, error.message);
+        results.push({
+          to: phoneNumber,
+          status: `❌ Error al enviar: ${error.message}`
         });
       }
 
-      await delay(1200);
+      await MessageUtils.delay(CONFIG.DELAY_BETWEEN_MESSAGES);
     }
 
-  } catch (err) {
-    console.error('❌ Error procesando el Excel:', err);
+    console.log('✅ Proceso de envío finalizado');
+    return res.json({ success: true, results });
+  } catch (error) {
+    console.error('❌ Error en el proceso:', error);
     return res.status(500).json({
-      error: 'Error al procesar el archivo',
-      details: err.message
+      error: 'Error al procesar la solicitud',
+      details: error.message
     });
   } finally {
-    try {
-      fs.unlinkSync(req.file.path);
-      console.log('🗑️ Archivo Excel temporal eliminado');
-    } catch (e) {
-      console.warn('⚠️ No se pudo eliminar el archivo temporal:', e.message);
-    }
-
-    if (rutaMediaDescargada && fs.existsSync(rutaMediaDescargada)) {
-      try {
-        fs.unlinkSync(rutaMediaDescargada);
-        console.log('🗑️ Media descargada eliminada');
-      } catch (e) {
-        console.warn('⚠️ No se pudo eliminar el archivo media descargado:', e.message);
-      }
-    }
+    console.log(tempFilesToDelete);
+    tempFilesToDelete.forEach(filePath => FileUtils.deleteFile(filePath));
   }
-
-  console.log('✅ Proceso de envío finalizado');
-  res.json({ success: true, results: resultados });
 };
 
 module.exports = { sendMessages };

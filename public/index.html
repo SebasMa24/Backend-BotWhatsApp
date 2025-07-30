@@ -58,6 +58,10 @@
 
       <input type="file" id="excelInput" accept=".xlsx, .xls" />
 
+      <label for="mediaFile">O selecciona archivo multimedia (imagen/video):</label>
+      <input type="file" id="mediaFile" accept="image/*,video/*" />
+      <video id="previewVideo" controls style="max-width: 300px; display: none; margin-top: 10px;"></video>
+
       <label for="mensajePlantilla">Mensaje personalizado:</label>
       <textarea id="mensajePlantilla" rows="4"
         placeholder="Ejemplo: Buen día {prefijo} {nombre}, este es un mensaje de prueba."></textarea>
@@ -187,6 +191,7 @@
       const mediaUrl = document.getElementById('mediaUrlExcel').value.trim();
       const resultadoEl = document.getElementById('resultado');
       const excelFile = document.getElementById('excelInput');
+      const mediaFileInput = document.getElementById('mediaFile');
 
       if (!excelFile || !excelFile.files[0]) {
         alert('⚠️ Debes cargar un archivo Excel.');
@@ -208,6 +213,10 @@
       formData.append('excel', excelFile.files[0]);
       formData.append('mensajePlantilla', plantilla);
       formData.append('mediaUrl', mediaUrl);
+
+      if (mediaFileInput && mediaFileInput.files.length > 0) {
+        formData.append('mediaFile', mediaFileInput.files[0]);
+      }
 
       resultadoEl.innerHTML = '⏳ Enviando mensajes...<br>';
 
@@ -233,7 +242,6 @@
         resultadoEl.innerHTML = '❌ Error de red al enviar los mensajes.';
       }
     }
-
     const inputUrl = document.getElementById('mediaUrlExcel');
     const infoUrl = document.getElementById('urlValidaInfo');
     const previewImagen = document.getElementById('previewImagen');

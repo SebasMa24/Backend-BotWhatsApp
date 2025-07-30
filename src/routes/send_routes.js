@@ -58,6 +58,9 @@ const { sendMessages } = require('../controllers/send_controller');
  *       500:
  *         description: Error interno del servidor al procesar el archivo.
  */
-router.post('/send', upload.single('excel'), sendMessages);
+router.post('/send', upload.fields([
+  { name: 'excel', maxCount: 1 },
+  { name: 'mediaFile', maxCount: 1 }
+]), sendMessages);
 
 module.exports = router;
