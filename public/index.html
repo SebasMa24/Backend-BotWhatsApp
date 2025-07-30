@@ -193,7 +193,7 @@
         return;
       }
 
-      if (!plantilla.includes('{Nombre}')) {
+      if (!/{\s*nombre\s*}/i.test(plantilla)) {
         alert('⚠️ El mensaje debe contener al menos el marcador {Nombre}.');
         return;
       }
