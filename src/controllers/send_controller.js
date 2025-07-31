@@ -165,15 +165,15 @@ const sendMessages = async (req, res) => {
     const excelFile = req.files?.excel?.[0];
     const uploadedMedia = req.files?.mediaFile?.[0];
 
-    
+
     tempFilesToDelete.push(excelFile.path);
     if (uploadedMedia) tempFilesToDelete.push(uploadedMedia.path);
 
     // Validación: Solo un medio permitido (URL o archivo subido)
     if (mediaUrl && uploadedMedia) {
       console.warn('🚫 Se recibieron ambos: mediaUrl y archivo multimedia');
-      return res.status(400).json({ 
-        error: 'Solo se permite un medio a la vez: URL o archivo subido, no ambos.' 
+      return res.status(400).json({
+        error: 'Solo se permite un medio a la vez: URL o archivo subido, no ambos.'
       });
     }
 
@@ -226,16 +226,20 @@ const sendMessages = async (req, res) => {
       console.log(`📱 Enviando a ${phoneNumber} -> Mensaje:`, message);
 
       try {
+        const isRegistered = await client.isRegisteredUser(phoneNumber);
+        if (!isRegistered) {
+          console.warn(`⚠️ El número ${phoneNumber} no está registrado en WhatsApp`);
+          results.push({ to: phoneNumber, status: '⚠️ No registrado' });
+          continue;
+        }
         await client.sendMessage(phoneNumber, message);
         console.log(`✅ Mensaje enviado a ${phoneNumber}`);
 
         if (mediaInfo) {
           await MessageUtils.delay(CONFIG.DELAY_BEFORE_MEDIA);
           console.log(`📎 Enviando media a ${phoneNumber} (${mediaInfo.isVideo ? 'video/documento' : 'imagen'})`);
-          
           const options = mediaInfo.isVideo ? { sendMediaAsDocument: true } : {};
           await client.sendMessage(phoneNumber, mediaInfo.media, options);
-          
           console.log(`✅ Media enviada a ${phoneNumber}`);
         }
 
