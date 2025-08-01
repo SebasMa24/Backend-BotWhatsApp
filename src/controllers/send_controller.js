@@ -218,9 +218,8 @@ const sendMessages = async (req, res) => {
     const results = [];
     for (const [index, row] of data.entries()) {
       console.log(`📨 Procesando fila ${index + 1}:`, row);
-
-      const phoneNumber = MessageUtils.formatPhoneNumber(row.Celular);
       const variables = MessageUtils.normalizeTemplateVariables(row);
+      const phoneNumber = MessageUtils.formatPhoneNumber(variables['celular']);
       const message = MessageUtils.replaceTemplateVariables(template, variables);
 
       console.log(`📱 Enviando a ${phoneNumber} -> Mensaje:`, message);
