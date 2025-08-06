@@ -50,6 +50,9 @@
 
   <h1>🤖 Estado del Bot de WhatsApp</h1>
   <div id="status">⏳ Cargando estado...</div>
+  <button id="btnDesconectar" onclick="desconectar()" style="display: none; background-color: #f44336; color: white;">
+    🔌 Cerrar Sesión
+  </button>
   <img id="qr" src="" alt="Código QR" />
 
   <div id="formulario">
@@ -91,19 +94,23 @@
 
         const statusEl = document.getElementById('status');
         const qrEl = document.getElementById('qr');
+        const btnDesconectar = document.getElementById('btnDesconectar');
 
         if (data.status === 'waiting') {
           statusEl.textContent = '📱 Escanea el código QR con WhatsApp';
           qrEl.src = data.qr;
           qrEl.style.display = 'block';
+          btnDesconectar.style.display = 'none';
           clienteListo = false;
         } else if (data.status === 'ready') {
           statusEl.textContent = '✅ Cliente conectado y listo';
           qrEl.style.display = 'none';
+          btnDesconectar.style.display = 'inline-block';
           clienteListo = true;
         } else {
           statusEl.textContent = '⏳ Esperando QR...';
           qrEl.style.display = 'none';
+          btnDesconectar.style.display = 'none';
           clienteListo = false;
         }
       } catch (err) {
@@ -114,7 +121,23 @@
 
       setTimeout(checkQRStatus, 5000);
     }
+    async function desconectar() {
+      if (!confirm('¿Seguro que quieres desconectar la sesión de WhatsApp?')) return;
 
+      try {
+        const res = await fetch('/api/disconnect');
+        const data = await res.json();
+
+        if (data.success) {
+          alert('✅ Cliente desconectado exitosamente.');
+        } else {
+          alert('❌ No se pudo desconectar: ' + (data.error || 'Error desconocido.'));
+        }
+      } catch (err) {
+        alert('❌ Error de red al desconectar.');
+        console.error(err);
+      }
+    }
     document.getElementById('excelInput').addEventListener('change', handleFile);
 
     function handleFile(e) {

@@ -268,4 +268,25 @@ const sendMessages = async (req, res) => {
   }
 };
 
-module.exports = { sendMessages };
+const disconnectClient = async (req, res) => {
+  try {
+    if (!isClientReady()) {
+      return res.status(400).json({ error: 'El cliente de WhatsApp ya está desconectado o no está listo.' });
+    }
+
+    await client.destroy();
+    client.initialize();
+    console.log('🔌 Sesión de WhatsApp desconectada correctamente.');
+    return res.json({ success: true, message: 'Sesión desconectada correctamente.' });
+  } catch (error) {
+    console.error('❌ Error al desconectar sesión:', error.message);
+    return res.status(500).json({ error: 'Error al desconectar sesión', details: error.message });
+  }
+};
+
+module.exports = {
+  sendMessages,
+  disconnectClient
+};
+
+module.exports = { sendMessages , disconnectClient};

@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
 
-const { sendMessages } = require('../controllers/send_controller');
+const { sendMessages,disconnectClient } = require('../controllers/send_controller');
 
 
 /**
@@ -62,5 +62,7 @@ router.post('/send', upload.fields([
   { name: 'excel', maxCount: 1 },
   { name: 'mediaFile', maxCount: 1 }
 ]), sendMessages);
+
+router.get('/disconnect', disconnectClient);
 
 module.exports = router;
